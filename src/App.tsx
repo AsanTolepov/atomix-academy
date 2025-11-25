@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { User, AIResult } from './types';
-import { MOCK_USER, ACHIEVEMENTS_LIST } from './constants';
+import { ACHIEVEMENTS_LIST } from './constants'; // MOCK_USER olib tashlandi
 
 // Firebase
 import { auth, db } from './services/firebase';
@@ -27,13 +27,14 @@ const LoadingScreen = () => (
 );
 
 const useAppStore = () => {
-  const [user, setUser] = useState<User>(MOCK_USER);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState<Record<string, any>>(MOCK_USER.progress);
+  const [progress, setProgress] = useState<Record<string, any>>({});
   const [newAchievement, setNewAchievement] = useState<any>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+        setLoading(true);
         if (currentUser) {
             const docRef = doc(db, "users", currentUser.uid);
             const docSnap = await getDoc(docRef);
@@ -42,7 +43,7 @@ const useAppStore = () => {
                 let userData = docSnap.data() as User;
                 let shouldUpdate = false;
 
-                // Yutuqlar ro'yxatini tekshirish
+                // Yutuqlar tekshiruvi
                 const currentAchievements = userData.achievements || {};
                 const newAchievements = { ...currentAchievements };
                 ACHIEVEMENTS_LIST.forEach((ach) => {
@@ -52,7 +53,7 @@ const useAppStore = () => {
                     }
                 });
 
-                // Streak (Kunlik kirish) mantiqi
+                // Streak tekshiruvi
                 const today = new Date().toDateString();
                 const lastLogin = userData.lastLoginDate;
                 if (lastLogin !== today) {
@@ -78,21 +79,44 @@ const useAppStore = () => {
                 setUser(userData);
                 setProgress(userData.progress || {});
             }
+        } else {
+            setUser(null);
         }
         setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
+  // --- MUHIM QISM: VIDEO TUGAGANDA ---
   const completeVideo = async (lessonId: string) => {
-    if (!auth.currentUser) return;
-    const newProgress = { ...progress, [lessonId]: { ...progress[lessonId], videoWatched: true } };
+    if (!auth.currentUser || !user) return;
+    
+    console.log("Video tugadi:", lessonId); // Tekshirish uchun log
+
+    // 1. Progress obyektini yangilash (ESKI ma'lumotni saqlab qolgan holda)
+    const currentLessonProgress = progress[lessonId] || {};
+    const newProgress = { 
+        ...progress, 
+        [lessonId]: { 
+            ...currentLessonProgress, 
+            videoWatched: true 
+        } 
+    };
+    
+    // 2. Lokal state'ni yangilash (Ikkalasini ham yangilaymiz)
     setProgress(newProgress);
-    await setDoc(doc(db, "users", auth.currentUser.uid), { progress: newProgress }, { merge: true });
+    setUser(prev => prev ? ({ ...prev, progress: newProgress }) : null); // Bu qator ekranni qayta chizadi
+
+    // 3. Firebase-ga yozish
+    try {
+        await setDoc(doc(db, "users", auth.currentUser.uid), { progress: newProgress }, { merge: true });
+    } catch (e) {
+        console.error("Firebaseda xatolik:", e);
+    }
   };
 
   const completeTask = async (lessonId: string, aiResult: AIResult) => {
-     if (!auth.currentUser) return;
+     if (!auth.currentUser || !user) return;
     const newProgress = { ...progress, [lessonId]: { ...progress[lessonId], taskCompleted: true, score: aiResult.score } };
     let newXp = user.xp + aiResult.score;
     
@@ -114,7 +138,8 @@ const useAppStore = () => {
     }
 
     setProgress(newProgress);
-    setUser(prev => ({ ...prev, xp: newXp, achievements: currentAchievements, badges: updatedBadges }));
+    setUser(prev => prev ? ({ ...prev, xp: newXp, achievements: currentAchievements, badges: updatedBadges, progress: newProgress }) : null);
+    
     if (achievementUnlocked) setNewAchievement(achievementUnlocked);
 
     await setDoc(doc(db, "users", auth.currentUser.uid), { 
@@ -132,10 +157,7 @@ const App = () => {
   if (loading) return <LoadingScreen />;
 
   return (
-    // 1. TASHQI FON (Kompyuterda ochganda atrof kulrang bo'ladi)
     <div className="min-h-screen bg-gray-100 flex justify-center items-start font-sans text-gray-900">
-      
-      {/* 2. MOBIL KONTEYNER (Maksimal 480px) */}
       <div className="w-full max-w-[480px] min-h-screen bg-white shadow-2xl relative overflow-x-hidden">
         
         <HashRouter>
@@ -149,32 +171,37 @@ const App = () => {
           )}
 
           <Routes>
-            {/* NAVBARSIZ SAHIFALAR (To'liq ekran) */}
-            <Route path="/welcome" element={<WelcomeScreen />} />
+            <Route path="/" element={user ? <Navigate to="/app" replace /> : <Navigate to="/login" replace />} />
+
             <Route path="/login" element={<LoginScreen />} />
+            <Route path="/welcome" element={<WelcomeScreen />} />
             
             <Route 
                 path="/app/lesson/:lessonId" 
                 element={
-                    <LessonScreen 
-                        userProgress={progress} 
-                        onVideoComplete={completeVideo} 
-                        onTaskComplete={completeTask} 
-                    />
+                    user ? (
+                        <LessonScreen 
+                            userProgress={progress} 
+                            onVideoComplete={completeVideo} 
+                            onTaskComplete={completeTask} 
+                        />
+                    ) : <Navigate to="/login" />
                 } 
             />
 
-            {/* NAVBARLI SAHIFALAR (Layout ichida) */}
-            <Route path="/*" element={
-              <Layout>
-                <Routes>
-                  <Route path="/" element={<HomeScreen user={user} />} />
-                  <Route path="/app" element={<HomeScreen user={user} />} />
-                  <Route path="/app/course/:id" element={<CourseDetails />} />
-                  <Route path="/app/profile" element={<ProfileScreen user={user} />} />
-                  <Route path="/app/leaderboard" element={<LeaderboardScreen />} />
-                </Routes>
-              </Layout>
+            <Route path="/app/*" element={
+              user ? (
+                  <Layout>
+                    <Routes>
+                      <Route path="/" element={<HomeScreen user={user} />} />
+                      <Route path="/course/:id" element={<CourseDetails />} />
+                      <Route path="/profile" element={<ProfileScreen user={user} />} />
+                      <Route path="/leaderboard" element={<LeaderboardScreen />} />
+                    </Routes>
+                  </Layout>
+              ) : (
+                  <Navigate to="/login" replace />
+              )
             } />
           </Routes>
         </HashRouter>
