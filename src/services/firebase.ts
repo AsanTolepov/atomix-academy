@@ -1,9 +1,8 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth"; // GoogleAuthProvider qo'shildi
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-    // Sizning kodingizdagi config shu yerda qoladi...
     apiKey: "AIzaSyDAz0JFeY5ksQfFjR8NKnIYjRnidgjrBv8",
     authDomain: "atomix-academy.firebaseapp.com",
     projectId: "atomix-academy",
@@ -14,6 +13,13 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const googleProvider = new GoogleAuthProvider(); // Provayderni eksport qilamiz
+
+// Google Providerni sozlash
+export const googleProvider = new GoogleAuthProvider();
+// Foydalanuvchidan har safar akkaunt tanlashni so'rash (xatoliklarni kamaytiradi)
+googleProvider.setCustomParameters({
+    prompt: 'select_account'
+});
